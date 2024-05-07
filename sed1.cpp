@@ -3,8 +3,8 @@
 #define SERVER_IP "127.0.0.1"
 #define SERVERPORT 9000
 #define BUFSIZE 512
+#define WINDOW_SIZE 3 // 윈도우 사이즈
 #define TOTAL_PACKETS 6 // 전체 패킷 개수
-#define MAX_RETRIES 3    // 재전송 허용 횟수
 
 typedef struct {
     int seq_num;
@@ -29,23 +29,29 @@ int main(int argc, char *argv[]) {
     retval = connect(sock, (struct sockaddr *)&serveraddr, sizeof(serveraddr));
     if (retval == SOCKET_ERROR) err_quit("connect()");
 
-    Packet packet;
+    Packet packets[TOTAL_PACKETS];
     int next_seq_num = 0;
-    int expected_ack_num = 0;
-    int retries[TOTAL_PACKETS] = {0}; // 각 패킷의 재전송 횟수를 추적
+    int base = 0;
+    int acked[TOTAL_PACKETS] = {0}; // 각 패킷의 ACK 상태를 추적
 
-    while (1) {
-        // 패킷 생성
-        packet.seq_num = next_seq_num;
-        sprintf(packet.message, "Data for packet %d", next_seq_num);
+    // 패킷 생성
+    for (int i = 0; i < TOTAL_PACKETS; i++) {
+        packets[i].seq_num = i;
+        sprintf(packets[i].message, "Data for packet %d", i);
+    }
 
-        // 패킷 전송
-        retval = send(sock, (char *)&packet, sizeof(Packet), 0);
-        if (retval == SOCKET_ERROR) {
-            err_display("send()");
-            break;
+    while (base < TOTAL_PACKETS) {
+        // 윈도우 내 패킷 전송
+        for (int i = base; i < base + WINDOW_SIZE && i < TOTAL_PACKETS; i++) {
+            if (!acked[i]) {
+                retval = send(sock, (char *)&packets[i], sizeof(Packet), 0);
+                if (retval == SOCKET_ERROR) {
+                    err_display("send()");
+                    break;
+                }
+                printf("* \"packet %d\" is transmitted.\n", packets[i].seq_num);
+            }
         }
-        printf("* \"packet %d\" is transmitted.\n", packet.seq_num);
 
         // ACK 기다리기
         int ack;
@@ -59,22 +65,14 @@ int main(int argc, char *argv[]) {
         }
 
         // 올바른 ACK인지 확인
-        if (ack == expected_ack_num) {
+        if (ack >= base && ack < base + WINDOW_SIZE) {
             printf("* \"ACK %d\" is received.\n", ack);
-            next_seq_num = (next_seq_num + 1) % TOTAL_PACKETS;
-            expected_ack_num = (expected_ack_num + 1) % TOTAL_PACKETS;
-            retries[ack] = 0; // ACK를 받으면 재전송 횟수 초기화
-            // 모든 패킷을 전송한 경우 루프 탈출
-            if (next_seq_num == 0)
-                break;
+            acked[ack] = 1; // 해당 ACK 처리 완료
+            // 윈도우 범위 내의 모든 패킷이 ACK를 받았는지 확인
+            while (acked[base])
+                base++;
         } else {
-            printf("* Unexpected ACK received for packet %d. Resending...\n", ack);
-            retries[ack]++; // 재전송 횟수 증가
-            // 재전송 횟수가 MAX_RETRIES를 초과하면 해당 패킷 재전송
-            if (retries[ack] > MAX_RETRIES) {
-                printf("* Max retries exceeded for packet %d. Resending...\n", ack);
-                next_seq_num = ack; // 해당 패킷부터 재전송
-            }
+            printf("* Unexpected ACK received: %d.\n", ack);
         }
     }
 
