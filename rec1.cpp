@@ -37,6 +37,8 @@ int main(int argc, char *argv[]) {
     socklen_t addrlen;
     Packet packet;
 
+    int expected_seq_num = 0; // 기대하는 시퀀스 번호
+
     while (1) {
         // accept()
         addrlen = sizeof(clientaddr);
@@ -56,19 +58,41 @@ int main(int argc, char *argv[]) {
             } else if (retval == 0)
                 break;
 
+            // 패킷 시퀀스 번호 확인
             printf("* \"packet %d\" is received.\n", packet.seq_num);
 
-            // ACK 보내기
-            retval = send(client_sock, (char *)&packet.seq_num, sizeof(int), 0);
-            if (retval == SOCKET_ERROR) {
-                err_display("send()");
-                break;
+            // 드랍된 패킷인 경우
+            if (packet.seq_num == 2) {
+                printf("* \"packet %d\" is dropped.\n", packet.seq_num);
+                continue; // 패킷 드랍 후 다음 패킷 수신 대기
             }
-            printf("* \"ACK %d\" is transmitted.\n", packet.seq_num);
 
-            // 모든 패킷을 수신했을 경우 루프 탈출
-            if (packet.seq_num == TOTAL_PACKETS - 1)
-                break;
+            // 패킷 시퀀스 번호가 기대하는 것과 일치하는지 확인
+            if (packet.seq_num == expected_seq_num) {
+                // ACK 보내기
+                retval = send(client_sock, (char *)&packet.seq_num, sizeof(int), 0);
+                if (retval == SOCKET_ERROR) {
+                    err_display("send()");
+                    break;
+                }
+                printf("* \"ACK %d\" is transmitted.\n", packet.seq_num);
+
+                // 다음 기대하는 시퀀스 번호로 업데이트
+                expected_seq_num = (expected_seq_num + 1) % TOTAL_PACKETS;
+
+                // 모든 패킷을 수신했을 경우 루프 탈출
+                if (packet.seq_num == TOTAL_PACKETS - 1)
+                    break;
+            } else {
+                // 기대하는 시퀀스 번호와 일치하지 않는 패킷은 무시하고 ACK 재전송 요청
+                printf("* Unexpected packet received. Waiting for packet %d.\n", expected_seq_num);
+                retval = send(client_sock, (char *)&expected_seq_num, sizeof(int), 0);
+                if (retval == SOCKET_ERROR) {
+                    err_display("send()");
+                    break;
+                }
+                printf("* ACK %d is retransmitted.\n", expected_seq_num);
+            }
         }
 
         // 소켓 닫기
