@@ -3,7 +3,6 @@
 #define SERVER_IP "127.0.0.1"
 #define SERVERPORT 9000
 #define BUFSIZE 512
-#define WINDOW_SIZE 3 // 윈도우 사이즈
 #define TOTAL_PACKETS 6 // 전체 패킷 개수
 
 typedef struct {
@@ -31,7 +30,6 @@ int main(int argc, char *argv[]) {
 
     Packet packets[TOTAL_PACKETS];
     int next_seq_num = 0;
-    int base = 0;
     int acked[TOTAL_PACKETS] = {0}; // 각 패킷의 ACK 상태를 추적
 
     // 처음 4개 패킷 생성
@@ -51,7 +49,7 @@ int main(int argc, char *argv[]) {
     }
 
     // 이후 패킷 전송
-    while (base < TOTAL_PACKETS) {
+    while (next_seq_num < TOTAL_PACKETS) {
         // ACK 기다리기
         int ack;
         retval = recv(sock, (char *)&ack, sizeof(int), 0);
@@ -64,13 +62,13 @@ int main(int argc, char *argv[]) {
         }
 
         // 올바른 ACK인지 확인
-        if (ack >= base && ack < base + WINDOW_SIZE) {
+        if (ack >= 0 && ack < TOTAL_PACKETS) {
             printf("* \"ACK %d\" is received.\n", ack);
             acked[ack] = 1; // 해당 ACK 처리 완료
-            // 윈도우 범위 내의 모든 패킷이 ACK를 받았는지 확인
-            while (acked[base])
-                base++;
             // 다음 패킷 전송
+            while (next_seq_num < TOTAL_PACKETS && acked[next_seq_num]) {
+                next_seq_num++;
+            }
             if (next_seq_num < TOTAL_PACKETS) {
                 retval = send(sock, (char *)&packets[next_seq_num], sizeof(Packet), 0);
                 if (retval == SOCKET_ERROR) {
@@ -78,7 +76,6 @@ int main(int argc, char *argv[]) {
                     break;
                 }
                 printf("* \"packet %d\" is transmitted.\n", packets[next_seq_num].seq_num);
-                next_seq_num++;
             }
         } else {
             printf("* Unexpected ACK received: %d.\n", ack);
