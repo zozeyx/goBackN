@@ -1,103 +1,98 @@
-#include "../Common.h"
+#include "Common.h"
 
-char *SERVERIP = (char *)"127.0.0.1";
+#define SERVERIP "127.0.0.1"
 #define SERVERPORT 9000
-#define BUFSIZE    512
+#define BUFSIZE 512
 #define WINDOW_SIZE 4
 #define TIMEOUT_INTERVAL 5
+#define TOTAL_PACKETS 6 // 전체 패킷 개수
 
-int main(int argc, char *argv[])
-{
-	int retval;
+typedef struct {
+    int seq_num;
+    char message[BUFSIZE];
+} Packet;
 
-	// 명령행 인수가 있으면 IP 주소로 사용
-	if (argc > 1) SERVERIP = argv[1];
+int main(int argc, char *argv[]) {
+    int retval;
 
-	// 소켓 생성
-	SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
-	if (sock == INVALID_SOCKET) err_quit("socket()");
+    // 소켓 생성
+    SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == INVALID_SOCKET) err_quit("socket()");
 
-	// connect()
-	struct sockaddr_in serveraddr;
-	memset(&serveraddr, 0, sizeof(serveraddr));
-	serveraddr.sin_family = AF_INET;
-	inet_pton(AF_INET, SERVERIP, &serveraddr.sin_addr);
-	serveraddr.sin_port = htons(SERVERPORT);
-	retval = connect(sock, (struct sockaddr *)&serveraddr, sizeof(serveraddr));
-	if (retval == SOCKET_ERROR) err_quit("connect()");
+    // connect()
+    struct sockaddr_in serveraddr;
+    memset(&serveraddr, 0, sizeof(serveraddr));
+    serveraddr.sin_family = AF_INET;
+    inet_pton(AF_INET, SERVERIP, &serveraddr.sin_addr);
+    serveraddr.sin_port = htons(SERVERPORT);
+    retval = connect(sock, (struct sockaddr *)&serveraddr, sizeof(serveraddr));
+    if (retval == SOCKET_ERROR) err_quit("connect()");
 
-	// 데이터 통신에 사용할 변수
-	char buf[BUFSIZE + 1];
-	int len;
-
-    // Go-Back-N 알고리즘을 위한 변수
-    int base = 0;
+    // 데이터 통신에 사용할 변수
+    Packet packet;
     int next_seq_num = 0;
-    int window[WINDOW_SIZE] = {0};
-    bool ack_received = false;
+    int base = 0;
+    int timer = 0;
+    int timeout_packet = -1; // timeout이 발생한 패킷
+    int last_ack_num = -1; // 마지막으로 받은 ACK 번호
 
-	// 서버와 데이터 통신
-	while (1) {
-        // 송신
-        while (next_seq_num < base + WINDOW_SIZE) {
-            // 데이터 보내기
-            printf("* \"packet %d\" is transmitted.\n", next_seq_num);
-            sprintf(buf, "packet %d", next_seq_num);
-            retval = send(sock, buf, (int)strlen(buf), 0);
-            if (retval == SOCKET_ERROR) {
-                err_display("send()");
-                break;
-            }
-
-            // 윈도우에 송신한 패킷 번호 추가
-            window[next_seq_num % WINDOW_SIZE] = next_seq_num;
-            next_seq_num++;
-        }
-
-        // 수신
-        while (1) {
-            // 데이터 받기
-            retval = recv(sock, buf, BUFSIZE, 0);
-            if (retval == SOCKET_ERROR) {
-                err_display("recv()");
-                break;
-            }
-            else if (retval == 0)
-                break;
-
-            // 받은 데이터 출력
-            buf[retval] = '\0';
-            printf("* \"%s\" is received. ", buf);
-            printf("* \"ACK %d\" is transmitted.\n", base);
-            retval = send(sock, buf, (int)strlen(buf), 0);
-            if (retval == SOCKET_ERROR) {
-                err_display("send()");
-                break;
-            }
-
-            // ACK 처리
-            int ack_num;
-            sscanf(buf, "ACK %d", &ack_num);
-            if (ack_num >= base && ack_num < next_seq_num) {
-                window[ack_num % WINDOW_SIZE] = -1; // ACK를 받은 패킷은 윈도우에서 제거
-                if (ack_num == base) {
-                    base++;
-                }
-            }
-
-            // 모든 패킷이 ACK를 받았는지 확인
-            ack_received = true;
-            for (int i = base; i < next_seq_num; i++) {
-                if (window[i % WINDOW_SIZE] != -1) {
-                    ack_received = false;
+    // 서버와 데이터 통신
+    while (base < TOTAL_PACKETS) {
+        // 패킷 전송
+        if (base == 0 || base == 2) {
+            for (int i = base; i < base + WINDOW_SIZE && i < TOTAL_PACKETS; ++i) {
+                packet.seq_num = i;
+                sprintf(packet.message, "packet %d", i);
+                retval = send(sock, (char *)&packet, sizeof(Packet), 0);
+                if (retval == SOCKET_ERROR) {
+                    err_display("send()");
                     break;
                 }
+                printf("* \"packet %d\" is transmitted.\n", packet.seq_num);
+                next_seq_num++;
             }
-            if (ack_received) break;
         }
-	}
 
-	// 소켓 닫기
-	close(sock);
-	return 0;
+        // ACK 확인
+        int ack_num;
+        retval = recv(sock, (char *)&ack_num, sizeof(int), 0);
+        if (retval == SOCKET_ERROR) {
+            err_display("recv()");
+            break;
+        } else if (retval == 0)
+            break;
+
+        // 동일한 ACK 무시
+        if (ack_num == last_ack_num) {
+            printf("* \"ACK %d\" is received and ignored.\n", ack_num);
+            continue;
+        }
+
+        printf("* \"ACK %d\" is received.\n", ack_num);
+        last_ack_num = ack_num;
+
+        // 패킷의 ACK 상태 업데이트
+        if (ack_num >= base) {
+            base = ack_num + 1;
+        }
+
+        // 타임아웃 처리
+        if (timer >= TIMEOUT_INTERVAL || timeout_packet != -1) {
+            if (timeout_packet == -1) {
+                printf("* packet %d is timeout.\n", base);
+                timeout_packet = base;
+            }
+            next_seq_num = timeout_packet; // 재전송을 위해 timeout이 발생한 패킷부터 재전송
+            timer = 0;
+            timeout_packet = -1; // timeout 패킷 재설정
+        }
+
+        // 타이머 초기화
+        timer++;
+    }
+
+    // 소켓 닫기
+    closesocket(sock);
+    WSACleanup();
+    return 0;
 }
