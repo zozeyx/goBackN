@@ -1,11 +1,8 @@
 #include "Common.h"
-#include <stdlib.h> // for rand() and srand()
-#include <time.h>   // for time()
 
 #define SERVERPORT 9000
 #define BUFSIZE 512
 #define WINDOW_SIZE 4
-#define TIMEOUT_INTERVAL 5
 #define TOTAL_PACKETS 6 // 전체 패킷 개수
 
 typedef struct {
@@ -39,10 +36,10 @@ int main(int argc, char *argv[]) {
     socklen_t addrlen;
     Packet packet;
 
-    // 패킷 2를 받았는지 여부를 나타내는 변수
-    int received_packet_2 = 0;
-
-    while (1) {
+    // 패킷 수신 및 ACK 전송
+    int expected_seq_num = 0;
+    int ignore_packet_2 = 0; // 패킷 2를 무시하는 플래그
+    while (expected_seq_num < TOTAL_PACKETS) {
         // accept()
         addrlen = sizeof(clientaddr);
         client_sock = accept(listen_sock, (struct sockaddr *)&clientaddr, &addrlen);
@@ -61,30 +58,46 @@ int main(int argc, char *argv[]) {
             } else if (retval == 0)
                 break;
 
-            // 패킷이 2번일 때 드롭하고, 이후 패킷들은 재전송 요청을 보내도록 함
-            if (packet.seq_num == 2 && !received_packet_2) {
-                received_packet_2 = 1;
-                continue; // 패킷 2를 받음
-            } else {
-                // 재전송 요청을 보냄
-                printf("* \"packet %d\" is received and dropped. \"ACK %d\" is retransmitted.\n", packet.seq_num, (packet.seq_num - 1 + TOTAL_PACKETS) % TOTAL_PACKETS);
-                retval = send(client_sock, (char *)&((packet.seq_num - 1 + TOTAL_PACKETS) % TOTAL_PACKETS), sizeof(int), 0);
+            printf("* \"packet %d\" is received.\n", packet.seq_num);
+
+            // 패킷 2를 무시하고 패킷 3부터 드랍시키고 ACK 1 전송
+            if (packet.seq_num == 2 && !ignore_packet_2) {
+                ignore_packet_2 = 1;
+                continue;
+            } else if (packet.seq_num >= 3) {
+                printf("* \"packet %d\" is received and dropped.\n", packet.seq_num);
+                retval = send(client_sock, (char *)&expected_seq_num, sizeof(int), 0);
                 if (retval == SOCKET_ERROR) {
                     err_display("send()");
                     break;
                 }
+                continue;
+            }
+
+            // 기대한 시퀀스 번호와 다르면 재전송
+            if (packet.seq_num != expected_seq_num) {
+                printf("* \"packet %d\" is received and dropped.\n", packet.seq_num);
+            } else {
+                // 기대한 시퀀스 번호와 같으면 ACK 전송
+                printf("* \"packet %d\" is received and delivered.\n", packet.seq_num);
+                expected_seq_num++;
+            }
+
+            // ACK 전송
+            printf("* \"ACK %d\" is transmitted.\n", expected_seq_num - 1);
+            retval = send(client_sock, (char *)&expected_seq_num, sizeof(int), 0);
+            if (retval == SOCKET_ERROR) {
+                err_display("send()");
+                break;
             }
 
             // 모든 패킷을 수신했을 경우 루프 탈출
-            if (packet.seq_num == TOTAL_PACKETS - 1)
+            if (expected_seq_num == TOTAL_PACKETS)
                 break;
         }
 
         // 소켓 닫기
         close(client_sock);
-
-        // 패킷 2를 다시 받을 수 있도록 초기화
-        received_packet_2 = 0;
     }
 
     // 소켓 닫기
