@@ -1,64 +1,71 @@
-#include "../Common.h"
+#include "Common.h"
 
-char *SERVERIP = (char *)"127.0.0.1";
+#define SERVER_IP "127.0.0.1"
 #define SERVERPORT 9000
-#define BUFSIZE    512
-#define PACKET_COUNT 6
+#define BUFSIZE 512
+#define TOTAL_PACKETS 6 // 전체 패킷 개수
 
-// 패킷을 전송하는 함수
-void send_packet(int seq_num) {
-    // 패킷을 전송하는 코드 추가
-    char packet_msg[BUFSIZE];
-    sprintf(packet_msg, "packet %d", seq_num);
-    send(sock, packet_msg, strlen(packet_msg), 0);
-    printf("\"packet %d\" is transmitted.\n", seq_num);
-}
+typedef struct {
+    int seq_num;
+    char message[BUFSIZE];
+} Packet;
 
-// Timeout 이벤트를 처리하는 함수
-void timeout_event(int seq_num) {
-    // Timeout 이벤트를 처리하는 코드 추가
-    printf("\"packet %d\" is timeout.\n", seq_num);
-    send_packet(seq_num);
-}
-
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
     int retval;
-
-    // 명령행 인수가 있으면 IP 주소로 사용
-    if (argc > 1) SERVERIP = argv[1];
 
     // 소켓 생성
     SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == INVALID_SOCKET) err_quit("socket()");
 
-    // connect()
+    // 서버 정보 설정
     struct sockaddr_in serveraddr;
     memset(&serveraddr, 0, sizeof(serveraddr));
     serveraddr.sin_family = AF_INET;
-    inet_pton(AF_INET, SERVERIP, &serveraddr.sin_addr);
+    serveraddr.sin_addr.s_addr = inet_addr(SERVER_IP);
     serveraddr.sin_port = htons(SERVERPORT);
+
+    // 서버에 연결
     retval = connect(sock, (struct sockaddr *)&serveraddr, sizeof(serveraddr));
     if (retval == SOCKET_ERROR) err_quit("connect()");
 
-    // 데이터 통신에 사용할 변수
-    char buf[BUFSIZE + 1];
-    int len;
+    Packet packet;
+    int next_seq_num = 0;
+    int expected_ack_num = 0;
 
-    // 서버와 데이터 통신
-    int packets_sent = 0;
-    while (packets_sent < PACKET_COUNT) {
+    while (1) {
+        // 패킷 생성
+        packet.seq_num = next_seq_num;
+        sprintf(packet.message, "Data for packet %d", next_seq_num);
+
         // 패킷 전송
-        send_packet(packets_sent);
-        packets_sent++;
-        usleep(1); // 1 time unit 대기
+        retval = send(sock, (char *)&packet, sizeof(Packet), 0);
+        if (retval == SOCKET_ERROR) {
+            err_display("send()");
+            break;
+        }
+        printf("* \"packet %d\" is transmitted.\n", packet.seq_num);
 
-        // Timeout 이벤트 처리
-        static int timer = 0;
-        timer++;
-        if (timer == TIMEOUT_INTERVAL) {
-            timeout_event(packets_sent - 1);
-            timer = 0;
+        // ACK 기다리기
+        int ack;
+        retval = recv(sock, (char *)&ack, sizeof(int), 0);
+        if (retval == SOCKET_ERROR) {
+            err_display("recv()");
+            break;
+        } else if (retval == 0) {
+            printf("Server disconnected.\n");
+            break;
+        }
+
+        // 올바른 ACK인지 확인
+        if (ack == expected_ack_num) {
+            printf("* \"ACK %d\" is received.\n", ack);
+            next_seq_num = (next_seq_num + 1) % TOTAL_PACKETS;
+            expected_ack_num = (expected_ack_num + 1) % TOTAL_PACKETS;
+            // 모든 패킷을 전송한 경우 루프 탈출
+            if (next_seq_num == 0)
+                break;
+        } else {
+            printf("* Unexpected ACK received. Resending packet %d.\n", packet.seq_num);
         }
     }
 
