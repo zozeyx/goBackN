@@ -34,25 +34,24 @@ int main(int argc, char *argv[]) {
     int base = 0;
     int acked[TOTAL_PACKETS] = {0}; // 각 패킷의 ACK 상태를 추적
 
-    // 패킷 생성
-    for (int i = 0; i < TOTAL_PACKETS; i++) {
+    // 처음 4개 패킷 생성
+    for (int i = 0; i < 4 && i < TOTAL_PACKETS; i++) {
         packets[i].seq_num = i;
         sprintf(packets[i].message, "Data for packet %d", i);
     }
 
-    while (base < TOTAL_PACKETS) {
-        // 윈도우 내 패킷 전송
-        for (int i = base; i < base + WINDOW_SIZE && i < TOTAL_PACKETS; i++) {
-            if (!acked[i]) {
-                retval = send(sock, (char *)&packets[i], sizeof(Packet), 0);
-                if (retval == SOCKET_ERROR) {
-                    err_display("send()");
-                    break;
-                }
-                printf("* \"packet %d\" is transmitted.\n", packets[i].seq_num);
-            }
+    // 처음 4개 패킷 전송
+    for (int i = 0; i < 4 && i < TOTAL_PACKETS; i++) {
+        retval = send(sock, (char *)&packets[i], sizeof(Packet), 0);
+        if (retval == SOCKET_ERROR) {
+            err_display("send()");
+            break;
         }
+        printf("* \"packet %d\" is transmitted.\n", packets[i].seq_num);
+    }
 
+    // 이후 패킷 전송
+    while (base < TOTAL_PACKETS) {
         // ACK 기다리기
         int ack;
         retval = recv(sock, (char *)&ack, sizeof(int), 0);
@@ -71,6 +70,16 @@ int main(int argc, char *argv[]) {
             // 윈도우 범위 내의 모든 패킷이 ACK를 받았는지 확인
             while (acked[base])
                 base++;
+            // 다음 패킷 전송
+            if (next_seq_num < TOTAL_PACKETS) {
+                retval = send(sock, (char *)&packets[next_seq_num], sizeof(Packet), 0);
+                if (retval == SOCKET_ERROR) {
+                    err_display("send()");
+                    break;
+                }
+                printf("* \"packet %d\" is transmitted.\n", packets[next_seq_num].seq_num);
+                next_seq_num++;
+            }
         } else {
             printf("* Unexpected ACK received: %d.\n", ack);
         }
