@@ -60,13 +60,13 @@ int main(int argc, char *argv[]){
 
 	for(int i=0; i<WINDOW_SIZE; i++){		
 		end++;
-		retval = send(sock, packet_str[t], strlen(packet_str[t]), 0);
+		retval = send(sock, packet_str[end], strlen(packet_str[end]), 0);
     	if (retval == SOCKET_ERROR) {
    			err_display("send()");
         	break;
     	}
 
-		for(int j=0; j<=t; j++){
+		for(int j=0; j<=end; j++){
 			if(ackCheck[j]==1){		
 				continue;
 			}
@@ -77,7 +77,7 @@ int main(int argc, char *argv[]){
 			}
 		}
 	
-		printf("\"%s\" is transmitted.\n", packet_str[t]);		
+		printf("\"%s\" is transmitted.\n", packet_str[end]);		
 	}	
 
 	for(int i=0; i<5; i++){
@@ -98,14 +98,14 @@ int main(int argc, char *argv[]){
 			start++;	
 			end++;	
 
-			retval = send(sock, packet_str[t], strlen(packet_str[t]), 0);	
+			retval = send(sock, packet_str[end], strlen(packet_str[end]), 0);	
 			if (retval == SOCKET_ERROR) {
 				err_display("send()");
 				break;
 			}
-			printf("\"%s\" is transmitted.\n", packet_str[t]);		
+			printf("\"%s\" is transmitted.\n", packet_str[end]);		
 
-			for(int j=0; j<=t; j++){		
+			for(int j=0; j<=end; j++){		
 				if(ackCheck[j]==1){		
 					continue;
 				}
@@ -124,7 +124,7 @@ int main(int argc, char *argv[]){
 		}else{		
 			printf("\"%s\" is received and ignored.\n", ack);	
 			end = ackCount+1;		 
-			for(int j=0; j<=t; j++){		
+			for(int j=0; j<=end; j++){		
 				if(ackCheck[j]==1){		
 					continue;
 				}
@@ -149,13 +149,13 @@ int main(int argc, char *argv[]){
 	
 	for(int i=0; i<WINDOW_SIZE; i++){
 		end++;
-		retval = send(sock, packet_str[t], strlen(packet_str[t]), 0);
+		retval = send(sock, packet_str[end], strlen(packet_str[end]), 0);
     	if (retval == SOCKET_ERROR) {
    			err_display("send()");
         	break;
     	}
 
-		for(int j=0; j<=t; j++){
+		for(int j=0; j<=end; j++){
 			if(ackCheck[j]==1){		
 				continue;
 			}
@@ -166,7 +166,7 @@ int main(int argc, char *argv[]){
 			}
 		}
 		
-		printf("\"%s\" is transmitted.\n", packet_str[t]);		//한번 보낼때마다 출력함
+		printf("\"%s\" is transmitted.\n", packet_str[end]);		//한번 보낼때마다 출력함
 	}
 	
 	// 소켓 닫기
